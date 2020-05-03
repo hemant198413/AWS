@@ -1,0 +1,136 @@
+{
+    "AWSTemplateFormatVersion" : "2010-09-09",
+      
+    "Description" : "Create EBS Volume.",
+    
+    "Parameters": {
+      
+        "EC2InstanceID" : {
+            "Type" : "AWS::EC2::Instance::Id",
+            "Description" : "Select Targeted EC2 InstanceId to attach Volume."
+        },
+        "Device" : {
+            "Type" : "String",
+            "Description" : "EBS Block device Name start with xvd[f-z].",
+            "Default" : "xvdf",
+            "AllowedPattern" : "^[x][v][d](?:[^abcbde]*)*$"
+        },       
+        "DiskSizeInGB" : {
+            "Description" : "Disk Size in GB (Min 1 GB to 16384 GB)",
+            "Default" : "1",
+            "Type" : "Number",
+                "MinValue" : "1",
+            "MaxValue" : "16384"
+        },
+        "VolumeName" : {
+            "Description" : "Tag Name for EBS Volume",
+            "Type" : "String",
+            "Default" : "EBS-Vol"
+        },
+        "VolumeType" : {
+            "Description" : "EBS Volume Type",
+            "Type" : "String",
+            "Default" : "GeneralPurposeSSD-gp2",
+            "AllowedValues" : ["GeneralPurposeSSD-gp2","ProvisionedIOPSSSD-io1","ThroughputOptimizedHDD-st1","ColdHDD-sc1"]
+        },
+        "IOPS": 
+        {
+            "Description" : "Input/Output Operations Per Second -Ranges 100 to 64000",
+            "Type" : "Number",
+            "Default" : "100",
+            "MinValue" : "100",
+            "MaxValue" : "64000"
+        },
+        "AvailabilityZone":{
+            "Description" :"Availability Zone Should be same as Targeted EC2 instance AvailabilityZone to Add attached EBS Storage.",
+            "Type" : "AWS::EC2::AvailabilityZone::Name",
+            "Default" : ""
+        }
+    },
+
+    "Mappings" : {  
+        "VolumeType" : {
+              "GeneralPurposeSSD-gp2" : {
+                  "Type" : "gp2"
+              },
+              "ProvisionedIOPSSSD-io1" : {
+                  "Type" : "io1"
+              },
+              "ThroughputOptimizedHDD-st1" : { 
+                  "Type" : "st1"
+              },
+              "ColdHDD-sc1" : { 
+                "Type" : "sc1"
+            }
+            }
+          },
+
+    "Resources": {
+        "EBSVolumeCreation": {
+            "Type": "AWS::EC2::Volume",
+            "Properties": {
+                "AvailabilityZone" :{"Ref":"AvailabilityZone"},
+                "Size":{ "Ref": "DiskSizeInGB" },
+                "Tags":[
+                {
+                    "Key": "Name",
+                    "Value" :{"Ref": "VolumeName"}
+                }],
+                "VolumeType":  {
+                    "Fn::FindInMap" : [
+                      "VolumeType",
+                      {"Ref": "VolumeType"},
+                      "Type"
+                      ]
+                    }
+            }
+        },
+        "AttachedEBSVolume":{
+            "Type" : "AWS::EC2::VolumeAttachment",
+            "Properties" : {
+                "Device" : {"Ref":"Device" },
+                "InstanceId" : {"Ref":"EC2InstanceID" },
+                "VolumeId" : {"Ref": "EBSVolumeCreation" }
+              }
+          },
+          "SSMRunPowerShellCommand":{
+            "Type" : "AWS::SSM::Association",
+            "DependsOn" : ["EBSVolumeCreation","AttachedEBSVolume"],
+            "Properties" : {
+            "AssociationName" : "EBSVolumeOperationalPS",
+            "Name" : "AWS-RunPowerShellScript",   
+            "Targets": [{
+                "Key": "InstanceIds",
+                "Values": [{
+                  "Ref": "EC2InstanceID"
+                }]
+              }],
+            "Parameters" : {           
+                "commands": [{"Fn::Sub": ["Get-Disk | Where SerialNumber -eq \"${VolumeId}\".Replace(\"-\",\"\") | Initialize-Disk -PartitionStyle MBR -PassThru | New-Partition -AssignDriveLetter -UseMaximumSize | Format-Volume -FileSystem NTFS -Confirm:$false -force",{"VolumeId":{"Ref":"EBSVolumeCreation"} }]}]
+                 }
+          }
+        }
+    },
+    "Outputs": {
+        "EBSVolumeCreation": {
+            "Description": "Created EBS Volume.", 
+            "Value": {
+                "Ref": "EBSVolumeCreation"
+            }
+        },
+        "AttachedEBSVolume": 
+        {
+            "Description": "Attached Volume Successfully.", 
+            "Value": {
+                "Ref": "AttachedEBSVolume"
+            }                       
+        },
+        "SSMRunPowerShellCommand": 
+            {
+                "Description": "Run command from SSM Sucessfully.", 
+                "Value": {
+                    "Ref": "SSMRunPowerShellCommand"
+                }                       
+            }
+    }
+}
